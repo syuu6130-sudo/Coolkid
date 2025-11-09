@@ -1,19 +1,24 @@
--- // 必要: Rayfield Library をロードしてから使用
--- 例:
--- local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- Rayfield Library をロード
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 
 -- === 設定 ===
-local targetUsername = "jpneko03016"
-local imageWidth, imageHeight = 720, 720
+local CONFIG = {
+    targetUsername = "jpneko03016",
+    imageSize = 720,
+    overlayTransparency = 0.6,  -- 0-1 (大きいほど暗い)
+    overlayColor = Color3.fromRGB(0, 0, 0),
+    zIndexBase = -100  -- 負の値でRayfield UIの下に配置
+}
 
 -- === 背景用関数 ===
 local function CreateAvatarBackground()
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
 
-    -- GUIが既に存在していたら削除
+    -- 既存のGUIを削除
     local existing = playerGui:FindFirstChild("RayfieldAvatarBackground")
     if existing then
         existing:Destroy()
@@ -24,8 +29,17 @@ local function CreateAvatarBackground()
     gui.Name = "RayfieldAvatarBackground"
     gui.IgnoreGuiInset = true
     gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = -1  -- Rayfieldより後ろに配置
     gui.Parent = playerGui
+
+    -- 背景コンテナ（フルスクリーン）
+    local container = Instance.new("Frame")
+    container.Name = "Container"
+    container.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    container.Size = UDim2.new(1, 0, 1, 0)
+    container.Position = UDim2.new(0, 0, 0, 0)
+    container.ZIndex = CONFIG.zIndexBase
+    container.Parent = gui
 
     -- 画像ラベル作成
     local img = Instance.new("ImageLabel")
@@ -34,53 +48,151 @@ local function CreateAvatarBackground()
     img.Size = UDim2.new(1, 0, 1, 0)
     img.Position = UDim2.new(0, 0, 0, 0)
     img.ScaleType = Enum.ScaleType.Crop
-    img.ZIndex = 0
-    img.Parent = gui
+    img.ZIndex = CONFIG.zIndexBase + 1
+    img.ImageTransparency = 1  -- フェードイン用
+    img.Parent = container
 
-    -- 暗めのオーバーレイ（任意）
+    -- オーバーレイ（背景を暗くする）
     local overlay = Instance.new("Frame")
     overlay.Name = "Overlay"
-    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    overlay.BackgroundTransparency = 0.5
+    overlay.BackgroundColor3 = CONFIG.overlayColor
+    overlay.BackgroundTransparency = CONFIG.overlayTransparency
     overlay.Size = UDim2.new(1, 0, 1, 0)
-    overlay.ZIndex = 1
-    overlay.Parent = gui
+    overlay.ZIndex = CONFIG.zIndexBase + 2
+    overlay.Parent = container
 
-    -- ユーザーIDを取得して画像URLを設定
-    local success, userIdOrErr = pcall(function()
-        return Players:GetUserIdFromNameAsync(targetUsername)
+    -- ユーザーIDを取得
+    local success, result = pcall(function()
+        return Players:GetUserIdFromNameAsync(CONFIG.targetUsername)
     end)
 
     if not success then
-        warn("ユーザーID取得失敗:", userIdOrErr)
-        return
+        warn("❌ ユーザーID取得失敗:", result)
+        -- フォールバック: デフォルト背景色を表示
+        container.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        return false
     end
 
-    local userId = userIdOrErr
-    local url = string.format(
-        "https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=%d&height=%d&format=png",
-        userId, imageWidth, imageHeight
-    )
-    img.Image = url
+    local userId = result
+    
+    -- 画像URLを設定（複数の方法を試行）
+    local imageUrls = {
+        -- 方法1: Thumbnail API
+        string.format(
+            "https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=%d&height=%d&format=png",
+            userId, CONFIG.imageSize, CONFIG.imageSize
+        ),
+        -- 方法2: Avatar thumbnail (フルボディ)
+        string.format(
+            "https://www.roblox.com/avatar-thumbnail/image?userId=%d&width=%d&height=%d&format=png",
+            userId, CONFIG.imageSize, CONFIG.imageSize
+        ),
+        -- 方法3: rbxthumb プロキシ
+        string.format(
+            "rbxthumb://type=AvatarHeadShot&id=%d&w=%d&h=%d",
+            userId, CONFIG.imageSize, CONFIG.imageSize
+        )
+    }
 
-    print("✅ 背景にアバター画像を設定しました:", targetUsername)
+    -- 最初のURLを試す
+    img.Image = imageUrls[1]
+
+    -- フェードインアニメーション
+    task.spawn(function()
+        task.wait(0.5)  -- 画像読み込み待機
+        
+        local tweenInfo = TweenInfo.new(
+            0.8,  -- 時間
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        )
+        
+        local tween = game:GetService("TweenService"):Create(
+            img,
+            tweenInfo,
+            {ImageTransparency = 0}
+        )
+        
+        tween:Play()
+    end)
+
+    print("✅ 背景にアバター画像を設定: " .. CONFIG.targetUsername)
+    return true
+end
+
+-- === Rayfield UI セットアップ ===
+local function SetupRayfieldUI()
+    local Window = Rayfield:CreateWindow({
+        Name = "🎨 Rayfield Avatar Background",
+        LoadingTitle = CONFIG.targetUsername .. " Avatar Background",
+        LoadingSubtitle = "by Sora",
+        ConfigurationSaving = {
+            Enabled = false
+        }
+    })
+
+    local MainTab = Window:CreateTab("🏠 Main", 4483362458)
+    local Section = MainTab:CreateSection("背景設定")
+
+    -- 背景再読み込みボタン
+    MainTab:CreateButton({
+        Name = "🔄 背景を再読み込み",
+        Callback = function()
+            CreateAvatarBackground()
+            Rayfield:Notify({
+                Title = "再読み込み完了",
+                Content = "背景を更新しました",
+                Duration = 3,
+                Image = 4483362458,
+            })
+        end,
+    })
+
+    -- オーバーレイの透明度スライダー
+    MainTab:CreateSlider({
+        Name = "🌓 背景の暗さ",
+        Range = {0, 1},
+        Increment = 0.05,
+        CurrentValue = CONFIG.overlayTransparency,
+        Callback = function(value)
+            CONFIG.overlayTransparency = value
+            local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+            local bg = playerGui:FindFirstChild("RayfieldAvatarBackground")
+            if bg then
+                local overlay = bg:FindFirstChild("Container"):FindFirstChild("Overlay")
+                if overlay then
+                    overlay.BackgroundTransparency = value
+                end
+            end
+        end,
+    })
+
+    -- 情報表示
+    MainTab:CreateParagraph({
+        Title = "ℹ️ 情報",
+        Content = "ターゲットユーザー: " .. CONFIG.targetUsername .. "\n画像サイズ: " .. CONFIG.imageSize .. "x" .. CONFIG.imageSize
+    })
+
+    -- 初期通知
+    Rayfield:Notify({
+        Title = "✅ 背景設定完了",
+        Content = CONFIG.targetUsername .. " のアバターを背景に設定しました",
+        Duration = 5,
+        Image = 4483362458,
+    })
 end
 
 -- === 実行 ===
-CreateAvatarBackground()
+local bgSuccess = CreateAvatarBackground()
 
--- === Rayfield UI の例（この部分に自分の UI を書く） ===
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+if bgSuccess then
+    task.wait(0.5)  -- 背景が準備できるまで待機
+end
 
-local Window = Rayfield:CreateWindow({
-    Name = "Rayfield Avatar Background Test",
-    LoadingTitle = "jpneko03016 Avatar Background",
-    LoadingSubtitle = "by Sora",
-})
+SetupRayfieldUI()
 
-Rayfield:Notify({
-    Title = "背景設定完了",
-    Content = "jpneko03016 のアバターを背景に設定しました！",
-    Duration = 6,
-    Image = 4483362458,
-})
+-- === クリーンアップ（プレイヤーがリスポーンした時）===
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    CreateAvatarBackground()
+end)
