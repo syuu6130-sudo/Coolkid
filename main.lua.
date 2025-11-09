@@ -1,417 +1,267 @@
--- ✅ ユニバーサル対応版 with Rayfield UI
--- 🌍 全ゲーム・全マップ対応機能
+-- Avatar Background Script with Rayfield UI
+-- アバターを背景として表示し、敵にも反映
 
-local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Avatar Background Script",
+   LoadingTitle = "アバター背景スクリプト",
+   LoadingSubtitle = "by @jpneko03016",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil,
+      FileName = "AvatarBG"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "noinvitelink",
+      RememberJoins = true
+   },
+   KeySystem = false
+})
 
 -- 設定
-local CONFIG = {
-    MAX_RETRIES = 3,
-    RETRY_DELAY = 1,
-    TIMEOUT = 10,
-    IMAGE_URLS = {
-        "rbxassetid://YOUR_IMAGE_ID_1",
-        "rbxassetid://YOUR_IMAGE_ID_2",
-        "rbxassetid://YOUR_IMAGE_ID_3"
-    }
+local Settings = {
+    Enabled = false,
+    Username = "jpneko03016",
+    ApplyToEnemies = true,
+    BackgroundTransparency = 0.5,
+    BackgroundSize = UDim2.new(2, 0, 2, 0)
 }
 
--- グローバル状態
-local State = {
-    isInitialized = false,
-    currentBackground = nil,
-    logs = {},
-    stats = {
-        initAttempts = 0,
-        errors = 0,
-        lastUpdate = os.time()
-    }
-}
+-- プレイヤーとサービス
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
--- 🔧 ユーティリティ関数
-local function Log(message, level)
-    level = level or "INFO"
-    local timestamp = os.date("%H:%M:%S")
-    local logEntry = string.format("[%s][%s] %s", timestamp, level, message)
-    table.insert(State.logs, logEntry)
-    print(logEntry)
+-- メインタブ
+local MainTab = Window:CreateTab("メイン設定", 4483362458)
+
+-- ユーザー名入力
+local UsernameInput = MainTab:CreateInput({
+   Name = "ユーザー名",
+   PlaceholderText = "Robloxユーザー名を入力",
+   RemoveTextAfterFocusLost = false,
+   Callback = function(Text)
+       Settings.Username = Text
+       Rayfield:Notify({
+          Title = "ユーザー名更新",
+          Content = "ユーザー名: " .. Text,
+          Duration = 3,
+          Image = 4483362458
+       })
+   end
+})
+
+UsernameInput:Set(Settings.Username)
+
+-- 有効化トグル
+local EnableToggle = MainTab:CreateToggle({
+   Name = "背景を有効化",
+   CurrentValue = Settings.Enabled,
+   Flag = "EnableBackground",
+   Callback = function(Value)
+       Settings.Enabled = Value
+       if Value then
+           ApplyBackgroundToAll()
+           Rayfield:Notify({
+              Title = "有効化",
+              Content = "アバター背景を適用しました",
+              Duration = 3,
+              Image = 4483362458
+           })
+       else
+           RemoveAllBackgrounds()
+           Rayfield:Notify({
+              Title = "無効化",
+              Content = "アバター背景を削除しました",
+              Duration = 3,
+              Image = 4483362458
+           })
+       end
+   end
+})
+
+-- 敵に適用するトグル
+local EnemyToggle = MainTab:CreateToggle({
+   Name = "敵にも適用",
+   CurrentValue = Settings.ApplyToEnemies,
+   Flag = "ApplyToEnemies",
+   Callback = function(Value)
+       Settings.ApplyToEnemies = Value
+   end
+})
+
+-- 透明度スライダー
+local TransparencySlider = MainTab:CreateSlider({
+   Name = "背景透明度",
+   Range = {0, 1},
+   Increment = 0.1,
+   Suffix = "",
+   CurrentValue = Settings.BackgroundTransparency,
+   Flag = "BackgroundTransparency",
+   Callback = function(Value)
+       Settings.BackgroundTransparency = Value
+       UpdateAllBackgroundTransparency()
+   end
+})
+
+-- サイズスライダー
+local SizeSlider = MainTab:CreateSlider({
+   Name = "背景サイズ倍率",
+   Range = {1, 5},
+   Increment = 0.5,
+   Suffix = "x",
+   CurrentValue = 2,
+   Flag = "BackgroundSize",
+   Callback = function(Value)
+       Settings.BackgroundSize = UDim2.new(Value, 0, Value, 0)
+       UpdateAllBackgroundSizes()
+   end
+})
+
+-- ボタン
+MainTab:CreateButton({
+   Name = "今すぐ適用",
+   Callback = function()
+       ApplyBackgroundToAll()
+       Rayfield:Notify({
+          Title = "適用完了",
+          Content = "全プレイヤーに背景を適用しました",
+          Duration = 3,
+          Image = 4483362458
+       })
+   end
+})
+
+MainTab:CreateButton({
+   Name = "背景をリセット",
+   Callback = function()
+       RemoveAllBackgrounds()
+       Rayfield:Notify({
+          Title = "リセット完了",
+          Content = "全ての背景を削除しました",
+          Duration = 3,
+          Image = 4483362458
+       })
+   end
+})
+
+-- 背景適用関数
+function ApplyBackground(player)
+    if not Settings.Enabled then return end
+    if not Settings.ApplyToEnemies and player ~= LocalPlayer then return end
     
-    -- 最大100件のログを保持
-    if #State.logs > 100 then
-        table.remove(State.logs, 1)
+    local character = player.Character
+    if not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    -- 既存の背景を削除
+    local existingBG = humanoidRootPart:FindFirstChild("AvatarBackground")
+    if existingBG then
+        existingBG:Destroy()
+    end
+    
+    -- BillboardGuiを作成
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Name = "AvatarBackground"
+    billboardGui.Size = Settings.BackgroundSize
+    billboardGui.StudsOffset = Vector3.new(0, 0, 0)
+    billboardGui.AlwaysOnTop = false
+    billboardGui.Parent = humanoidRootPart
+    
+    -- ImageLabelを作成
+    local imageLabel = Instance.new("ImageLabel")
+    imageLabel.Size = UDim2.new(1, 0, 1, 0)
+    imageLabel.BackgroundTransparency = 1
+    imageLabel.ImageTransparency = Settings.BackgroundTransparency
+    imageLabel.Image = "rbxthumb://type=AvatarHeadShot&id=" .. Players:GetUserIdFromNameAsync(Settings.Username) .. "&w=420&h=420"
+    imageLabel.ScaleType = Enum.ScaleType.Fit
+    imageLabel.Parent = billboardGui
+end
+
+function ApplyBackgroundToAll()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            ApplyBackground(player)
+        end
     end
 end
 
-local function SafeCall(func, context)
-    local success, result = pcall(func)
-    if not success then
-        State.stats.errors = State.stats.errors + 1
-        Log(string.format("%s エラー: %s", context, tostring(result)), "ERROR")
-        return false, result
-    end
-    return true, result
-end
-
--- 🌐 ネットワーク機能
-local function LoadImageWithRetry(imageLabel)
-    for attempt = 1, CONFIG.MAX_RETRIES do
-        for _, url in ipairs(CONFIG.IMAGE_URLS) do
-            local success = SafeCall(function()
-                imageLabel.Image = url
-            end, "画像読み込み")
-            
-            if success then
-                Log(string.format("画像読み込み成功: %s (試行: %d)", url, attempt), "SUCCESS")
-                return true
-            end
-            
-            task.wait(CONFIG.RETRY_DELAY)
-        end
-    end
-    
-    Log("すべての画像URLが失敗しました", "ERROR")
-    return false
-end
-
--- 🎮 プレイヤー初期化
-local function WaitForPlayerGui(timeout)
-    local player = Players.LocalPlayer
-    local startTime = tick()
-    
-    while not player:FindFirstChild("PlayerGui") do
-        if tick() - startTime > timeout then
-            Log("PlayerGui タイムアウト", "ERROR")
-            return nil
-        end
-        task.wait(0.1)
-    end
-    
-    Log("PlayerGui 検出成功", "SUCCESS")
-    return player.PlayerGui
-end
-
--- 🗑️ 既存GUI削除
-local function RemoveExistingGUI()
-    local success = SafeCall(function()
-        local playerGui = Players.LocalPlayer.PlayerGui
-        if playerGui:FindFirstChild("UniversalBackgroundGUI") then
-            playerGui.UniversalBackgroundGUI:Destroy()
-            Log("既存GUI削除完了", "INFO")
-        end
-    end, "既存GUI削除")
-    
-    return success
-end
-
--- 🖼️ 背景作成
-local function CreateBackground()
-    RemoveExistingGUI()
-    
-    local success, gui = SafeCall(function()
-        local playerGui = Players.LocalPlayer.PlayerGui
-        
-        -- ScreenGui作成
-        local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "UniversalBackgroundGUI"
-        screenGui.DisplayOrder = -1
-        screenGui.ResetOnSpawn = false
-        screenGui.IgnoreGuiInset = true
-        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        
-        -- 背景Frame
-        local background = Instance.new("Frame")
-        background.Name = "Background"
-        background.Size = UDim2.new(1, 0, 1, 0)
-        background.Position = UDim2.new(0, 0, 0, 0)
-        background.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        background.BorderSizePixel = 0
-        background.ZIndex = -1
-        background.Parent = screenGui
-        
-        -- 画像Label
-        local imageLabel = Instance.new("ImageLabel")
-        imageLabel.Name = "BackgroundImage"
-        imageLabel.Size = UDim2.new(1, 0, 1, 0)
-        imageLabel.Position = UDim2.new(0, 0, 0, 0)
-        imageLabel.BackgroundTransparency = 1
-        imageLabel.ScaleType = Enum.ScaleType.Stretch
-        imageLabel.ZIndex = -1
-        imageLabel.Parent = background
-        
-        screenGui.Parent = playerGui
-        
-        -- 画像読み込み
-        LoadImageWithRetry(imageLabel)
-        
-        return screenGui
-    end, "背景作成")
-    
-    if success then
-        State.currentBackground = gui
-        Log("背景作成成功", "SUCCESS")
-        return true
-    end
-    
-    return false
-end
-
--- 🚀 メイン初期化
-local function Initialize()
-    State.stats.initAttempts = State.stats.initAttempts + 1
-    Log(string.format("初期化開始 (試行: %d)", State.stats.initAttempts), "INFO")
-    
-    -- PlayerGui待機
-    local playerGui = WaitForPlayerGui(CONFIG.TIMEOUT)
-    if not playerGui then
-        return false
-    end
-    
-    -- 背景作成
-    if CreateBackground() then
-        State.isInitialized = true
-        Log("初期化完了", "SUCCESS")
-        return true
-    end
-    
-    return false
-end
-
--- 📊 システム情報取得
-local function GetSystemInfo()
-    local player = Players.LocalPlayer
-    return {
-        Username = player.Name,
-        DisplayName = player.DisplayName,
-        UserId = player.UserId,
-        GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name,
-        PlaceId = game.PlaceId,
-        FPS = math.floor(1 / RunService.RenderStepped:Wait()),
-        Ping = math.floor(player:GetNetworkPing() * 1000),
-        InitAttempts = State.stats.initAttempts,
-        Errors = State.stats.errors,
-        BackgroundActive = State.currentBackground ~= nil
-    }
-end
-
--- 🎨 Rayfield UI作成
-local function CreateRayfieldUI()
-    Log("Rayfield UI読み込み開始", "INFO")
-    
-    local success, Rayfield = SafeCall(function()
-        return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-    end, "Rayfield読み込み")
-    
-    if not success then
-        Log("Rayfield読み込み失敗", "ERROR")
-        return
-    end
-    
-    Log("Rayfield UI読み込み成功", "SUCCESS")
-    
-    -- ウィンドウ作成
-    local Window = Rayfield:CreateWindow({
-        Name = "🌍 ユニバーサル背景マネージャー",
-        LoadingTitle = "初期化中...",
-        LoadingSubtitle = "by Universal System",
-        ConfigurationSaving = {
-            Enabled = false
-        },
-        Discord = {
-            Enabled = false
-        },
-        KeySystem = false
-    })
-    
-    -- 🏠 ホームタブ
-    local HomeTab = Window:CreateTab("🏠 ホーム", 4483362458)
-    
-    HomeTab:CreateSection("システム状態")
-    
-    local StatusLabel = HomeTab:CreateLabel("状態: 初期化中...")
-    
-    HomeTab:CreateButton({
-        Name = "🔄 背景を再読み込み",
-        Callback = function()
-            Log("背景再読み込み開始", "INFO")
-            CreateBackground()
-            StatusLabel:Set("状態: 背景再読み込み完了 ✅")
-            Rayfield:Notify({
-                Title = "成功",
-                Content = "背景を再読み込みしました",
-                Duration = 3,
-                Image = 4483362458
-            })
-        end
-    })
-    
-    HomeTab:CreateButton({
-        Name = "🗑️ 背景を削除",
-        Callback = function()
-            if State.currentBackground then
-                State.currentBackground:Destroy()
-                State.currentBackground = nil
-                Log("背景削除完了", "INFO")
-                StatusLabel:Set("状態: 背景削除済み ❌")
-                Rayfield:Notify({
-                    Title = "削除完了",
-                    Content = "背景を削除しました",
-                    Duration = 3,
-                    Image = 4483362458
-                })
-            else
-                Rayfield:Notify({
-                    Title = "エラー",
-                    Content = "削除する背景がありません",
-                    Duration = 3,
-                    Image = 4483362458
-                })
-            end
-        end
-    })
-    
-    -- ⚙️ 設定タブ
-    local SettingsTab = Window:CreateTab("⚙️ 設定", 4483362458)
-    
-    SettingsTab:CreateSection("画像設定")
-    
-    SettingsTab:CreateInput({
-        Name = "カスタム画像ID",
-        PlaceholderText = "rbxassetid://123456789",
-        RemoveTextAfterFocusLost = false,
-        Callback = function(text)
-            if text and text ~= "" then
-                table.insert(CONFIG.IMAGE_URLS, 1, text)
-                LoadImageWithRetry(State.currentBackground.Background.BackgroundImage)
-                Log("カスタム画像適用: " .. text, "INFO")
-                Rayfield:Notify({
-                    Title = "画像更新",
-                    Content = "カスタム画像を適用しました",
-                    Duration = 3,
-                    Image = 4483362458
-                })
-            end
-        end
-    })
-    
-    SettingsTab:CreateSlider({
-        Name = "背景透明度",
-        Range = {0, 1},
-        Increment = 0.1,
-        CurrentValue = 1,
-        Callback = function(value)
-            if State.currentBackground then
-                State.currentBackground.Background.BackgroundImage.ImageTransparency = 1 - value
-            end
-        end
-    })
-    
-    -- 📊 統計タブ
-    local StatsTab = Window:CreateTab("📊 統計", 4483362458)
-    
-    StatsTab:CreateSection("システム情報")
-    
-    local InfoLabel = StatsTab:CreateLabel("読み込み中...")
-    
-    StatsTab:CreateButton({
-        Name = "🔄 情報更新",
-        Callback = function()
-            local info = GetSystemInfo()
-            local infoText = string.format(
-                "👤 ユーザー: %s (@%s)\n" ..
-                "🆔 ユーザーID: %d\n" ..
-                "🎮 ゲーム: %s\n" ..
-                "📍 PlaceID: %d\n" ..
-                "🖥️ FPS: %d\n" ..
-                "📡 Ping: %dms\n" ..
-                "🔄 初期化試行: %d回\n" ..
-                "❌ エラー数: %d\n" ..
-                "🖼️ 背景: %s",
-                info.DisplayName, info.Username, info.UserId,
-                info.GameName, info.PlaceId,
-                info.FPS, info.Ping,
-                info.InitAttempts, info.Errors,
-                info.BackgroundActive and "有効 ✅" or "無効 ❌"
-            )
-            InfoLabel:Set(infoText)
-        end
-    })
-    
-    -- 📝 ログタブ
-    local LogTab = Window:CreateTab("📝 ログ", 4483362458)
-    
-    LogTab:CreateSection("システムログ")
-    
-    local LogLabel = LogTab:CreateLabel("ログなし")
-    
-    LogTab:CreateButton({
-        Name = "📋 ログ表示",
-        Callback = function()
-            if #State.logs > 0 then
-                local recentLogs = {}
-                for i = math.max(1, #State.logs - 10), #State.logs do
-                    table.insert(recentLogs, State.logs[i])
+function RemoveAllBackgrounds()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local bg = humanoidRootPart:FindFirstChild("AvatarBackground")
+                if bg then
+                    bg:Destroy()
                 end
-                LogLabel:Set(table.concat(recentLogs, "\n"))
-            else
-                LogLabel:Set("ログなし")
             end
         end
-    })
-    
-    LogTab:CreateButton({
-        Name = "🗑️ ログクリア",
-        Callback = function()
-            State.logs = {}
-            LogLabel:Set("ログをクリアしました")
-            Rayfield:Notify({
-                Title = "クリア完了",
-                Content = "ログを削除しました",
-                Duration = 2,
-                Image = 4483362458
-            })
-        end
-    })
-    
-    -- 初期状態更新
-    if State.isInitialized then
-        StatusLabel:Set("状態: 初期化完了 ✅")
     end
-    
-    Log("Rayfield UI作成完了", "SUCCESS")
 end
 
--- 🚀 メイン実行
-task.spawn(function()
-    Log("=== ユニバーサルシステム起動 ===", "INFO")
-    
-    -- 初期化リトライ
-    local initSuccess = false
-    for attempt = 1, CONFIG.MAX_RETRIES do
-        if Initialize() then
-            initSuccess = true
-            break
+function UpdateAllBackgroundTransparency()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local bg = humanoidRootPart:FindFirstChild("AvatarBackground")
+                if bg then
+                    local imageLabel = bg:FindFirstChildOfClass("ImageLabel")
+                    if imageLabel then
+                        imageLabel.ImageTransparency = Settings.BackgroundTransparency
+                    end
+                end
+            end
         end
-        Log(string.format("初期化失敗、再試行中... (%d/%d)", attempt, CONFIG.MAX_RETRIES), "WARN")
-        task.wait(CONFIG.RETRY_DELAY)
     end
-    
-    if not initSuccess then
-        Log("初期化失敗: 最大試行回数を超えました", "ERROR")
+end
+
+function UpdateAllBackgroundSizes()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character then
+            local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            if humanoidRootPart then
+                local bg = humanoidRootPart:FindFirstChild("AvatarBackground")
+                if bg then
+                    bg.Size = Settings.BackgroundSize
+                end
+            end
+        end
     end
-    
-    -- Rayfield UI作成
-    task.wait(0.5)
-    CreateRayfieldUI()
-    
-    Log("=== システム起動完了 ===", "SUCCESS")
+end
+
+-- プレイヤー参加時の処理
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        wait(0.5) -- キャラクターのロードを待つ
+        if Settings.Enabled then
+            ApplyBackground(player)
+        end
+    end)
 end)
 
--- リスポーン対応
-Players.LocalPlayer.CharacterAdded:Connect(function()
-    Log("キャラクターリスポーン検出", "INFO")
-    task.wait(1)
-    if not State.currentBackground then
-        CreateBackground()
+-- 既存プレイヤーの処理
+for _, player in pairs(Players:GetPlayers()) do
+    if player.Character then
+        player.CharacterAdded:Connect(function(character)
+            wait(0.5)
+            if Settings.Enabled then
+                ApplyBackground(player)
+            end
+        end)
     end
-end)
+end
+
+-- 初期化メッセージ
+Rayfield:Notify({
+   Title = "スクリプト読み込み完了",
+   Content = "Avatar Background Script by @jpneko03016",
+   Duration = 5,
+   Image = 4483362458
+})
+
+print("Avatar Background Script loaded successfully!")
