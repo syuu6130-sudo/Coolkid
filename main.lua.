@@ -1,0 +1,86 @@
+-- // 必要: Rayfield Library をロードしてから使用
+-- 例:
+-- local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Players = game:GetService("Players")
+
+-- === 設定 ===
+local targetUsername = "jpneko03016"
+local imageWidth, imageHeight = 720, 720
+
+-- === 背景用関数 ===
+local function CreateAvatarBackground()
+    local player = Players.LocalPlayer
+    local playerGui = player:WaitForChild("PlayerGui")
+
+    -- GUIが既に存在していたら削除
+    local existing = playerGui:FindFirstChild("RayfieldAvatarBackground")
+    if existing then
+        existing:Destroy()
+    end
+
+    -- ScreenGui 作成
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "RayfieldAvatarBackground"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = playerGui
+
+    -- 画像ラベル作成
+    local img = Instance.new("ImageLabel")
+    img.Name = "AvatarImage"
+    img.BackgroundTransparency = 1
+    img.Size = UDim2.new(1, 0, 1, 0)
+    img.Position = UDim2.new(0, 0, 0, 0)
+    img.ScaleType = Enum.ScaleType.Crop
+    img.ZIndex = 0
+    img.Parent = gui
+
+    -- 暗めのオーバーレイ（任意）
+    local overlay = Instance.new("Frame")
+    overlay.Name = "Overlay"
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 0.5
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.ZIndex = 1
+    overlay.Parent = gui
+
+    -- ユーザーIDを取得して画像URLを設定
+    local success, userIdOrErr = pcall(function()
+        return Players:GetUserIdFromNameAsync(targetUsername)
+    end)
+
+    if not success then
+        warn("ユーザーID取得失敗:", userIdOrErr)
+        return
+    end
+
+    local userId = userIdOrErr
+    local url = string.format(
+        "https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=%d&height=%d&format=png",
+        userId, imageWidth, imageHeight
+    )
+    img.Image = url
+
+    print("✅ 背景にアバター画像を設定しました:", targetUsername)
+end
+
+-- === 実行 ===
+CreateAvatarBackground()
+
+-- === Rayfield UI の例（この部分に自分の UI を書く） ===
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Rayfield Avatar Background Test",
+    LoadingTitle = "jpneko03016 Avatar Background",
+    LoadingSubtitle = "by Sora",
+})
+
+Rayfield:Notify({
+    Title = "背景設定完了",
+    Content = "jpneko03016 のアバターを背景に設定しました！",
+    Duration = 6,
+    Image = 4483362458,
+})
